@@ -1,0 +1,27 @@
+FROM node:20-bookworm-slim
+
+WORKDIR /app
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY package.json package-lock.json ./
+COPY apps/web/package.json apps/web/package.json
+COPY apps/backtest/package.json apps/backtest/package.json
+COPY apps/worker/package.json apps/worker/package.json
+COPY packages/trading/package.json packages/trading/package.json
+COPY prisma/schema.prisma prisma/schema.prisma
+RUN npm install
+
+COPY . .
+
+RUN npm run db:generate \
+  && npm --prefix packages/trading run build \
+  && npm --prefix apps/web run build
+
+ENV NODE_ENV=production
+ENV PORT=3012
+EXPOSE 3012
+
+CMD ["sh", "-lc", "npm --prefix apps/web run start -- --hostname 0.0.0.0 --port ${PORT:-3012}"]

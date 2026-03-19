@@ -1,0 +1,14 @@
+node_modules
+.turbo
+.next
+dist
+coverage
+*.log
+.env
+.env.local
+artifacts
+apps/backtest/.turbo
+apps/backtest/data
+apps/backtest/results
+apps/web/tsconfig.tsbuildinfo
+apps/web/src/.next

@@ -1,0 +1,51 @@
+app = "noon-trader-worker"
+primary_region = "sin"
+
+[build]
+  dockerfile = "Dockerfile.worker"
+
+[deploy]
+  release_command = "npm run db:migrate:prod"
+
+[env]
+  NODE_ENV = "production"
+  LOG_LEVEL = "info"
+  ENABLE_OPPORTUNITY_SIGNALS = "true"
+  OPPORTUNITY_SIGNALS_INTERVAL_SECONDS = "300"
+  OPPORTUNITY_MIN_SCORE = "190"
+  OPPORTUNITY_VOLATILE_SCORE_BONUS = "10"
+  OPPORTUNITY_MIN_SCAN_STREAK = "2"
+  OPPORTUNITY_REQUIRE_EMA_BOUNCE = "false"
+  OPPORTUNITY_EMA_BOUNCE_MIN_CONFLUENCE = "2"
+  OPPORTUNITY_BLOCK_RANGING_REGIME = "false"
+  OPPORTUNITY_MIN_VOL_RATIO = "0.6"
+  ENABLE_EMERGING_MOVERS_SIGNALS = "false"
+  EMERGING_MOVERS_COMMAND = "EMERGING_HISTORY='./artifacts/emerging-movers-history.json' python3 './scripts/emerging-movers.py'"
+  EMERGING_MOVERS_INTERVAL_SECONDS = "60"
+  ENABLE_WHALE_SIGNALS = "false"
+  WHALE_SIGNALS_INTERVAL_SECONDS = "1800"
+  WHALE_RISK_PROFILE = "moderate"
+  ENABLE_PAPER_TRADING = "true"
+  PAPER_TRADING_INITIAL_EQUITY = "1000"
+  PAPER_TRADING_ASSETS = "BTC,ETH,SOL"
+  PAPER_TRADING_INTERVAL_SECONDS = "300"
+  PAPER_TRADING_RISK_PER_TRADE = "1"
+  PAPER_TRADING_MIN_RR = "2"
+  PAPER_TRADING_MAX_DRAWDOWN = "10"
+  PAPER_TRADING_DAILY_LOSS_LIMIT = "3"
+  PAPER_TRADING_MAX_HOLD_HOURS = "72"
+  PAPER_TRADING_MIN_ADX = "15"
+  PAPER_TRADING_MIN_ENTRY_SCORE = "45"
+  PAPER_TRADING_REENTRY_COOLDOWN_HOURS = "8"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory = "512mb"

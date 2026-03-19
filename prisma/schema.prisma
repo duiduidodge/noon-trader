@@ -1,0 +1,169 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model EmergingMoverSnapshot {
+  id               String               @id @default(cuid())
+  status           String               @default("ok")
+  signalTime       DateTime             @map("signal_time")
+  totalMarkets     Int?
+  scansInHistory   Int?
+  hasImmediate     Boolean              @default(false) @map("has_immediate")
+  hasEmergingMover Boolean              @default(false) @map("has_emerging_mover")
+  hasDeepClimber   Boolean              @default(false) @map("has_deep_climber")
+  top5             Json?
+  rawPayload       Json                 @map("raw_payload")
+  createdAt        DateTime             @default(now()) @map("created_at")
+  alerts           EmergingMoverAlert[]
+
+  @@index([signalTime])
+  @@index([createdAt])
+  @@map("EmergingMoverSnapshot")
+}
+
+model EmergingMoverAlert {
+  id              String                @id @default(cuid())
+  snapshotId      String                @map("snapshot_id")
+  snapshot        EmergingMoverSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  signal          String
+  direction       String?
+  currentRank     Int?                  @map("current_rank")
+  contribution    Decimal?              @db.Decimal(6,2)
+  contribVelocity Decimal?              @map("contrib_velocity") @db.Decimal(8,4)
+  traders         Int?
+  priceChg4h      Decimal?              @map("price_chg_4h") @db.Decimal(8,2)
+  reasonCount     Int                   @default(0) @map("reason_count")
+  reasons         Json
+  rankHistory     Json?                 @map("rank_history")
+  contribHistory  Json?                 @map("contrib_history")
+  isImmediate     Boolean               @default(false) @map("is_immediate")
+  isDeepClimber   Boolean               @default(false) @map("is_deep_climber")
+  erratic         Boolean               @default(false)
+  lowVelocity     Boolean               @default(false) @map("low_velocity")
+  createdAt       DateTime              @default(now()) @map("created_at")
+
+  @@index([snapshotId])
+  @@index([isImmediate])
+  @@index([currentRank])
+  @@index([createdAt])
+  @@map("EmergingMoverAlert")
+}
+
+model OpportunitySnapshot {
+  id            String              @id @default(cuid())
+  scanTime      DateTime            @map("scan_time")
+  assetsScanned Int?                @map("assets_scanned")
+  passedStage1  Int?                @map("passed_stage1")
+  passedStage2  Int?                @map("passed_stage2")
+  deepDived     Int?                @map("deep_dived")
+  disqualified  Int?                @default(0)
+  btcContext    Json?               @map("btc_context")
+  rawPayload    Json                @map("raw_payload")
+  createdAt     DateTime            @default(now()) @map("created_at")
+  opportunities OpportunitySignal[]
+
+  @@index([scanTime])
+  @@index([createdAt])
+  @@map("OpportunitySnapshot")
+}
+
+model OpportunitySignal {
+  id           String              @id @default(cuid())
+  snapshotId   String              @map("snapshot_id")
+  snapshot     OpportunitySnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  asset        String
+  direction    String?
+  leverage     Int?
+  finalScore   Int?                @map("final_score")
+  scoreDelta   Int?                @map("score_delta")
+  scanStreak   Int?                @map("scan_streak")
+  hourlyTrend  String?             @map("hourly_trend")
+  trendAligned Boolean             @default(false) @map("trend_aligned")
+  pillarScores Json?               @map("pillar_scores")
+  smartMoney   Json?               @map("smart_money")
+  technicals   Json?
+  funding      Json?
+  risks        Json?
+  exitLevels   Json?               @map("exit_levels")
+  positionSize Json?               @map("position_size")
+  createdAt    DateTime            @default(now()) @map("created_at")
+
+  @@index([snapshotId])
+  @@index([asset])
+  @@index([finalScore])
+  @@index([createdAt])
+  @@map("OpportunitySignal")
+}
+
+model WhaleSnapshot {
+  id            String       @id @default(cuid())
+  scanTime      DateTime     @map("scan_time")
+  timeframe     String       @default("30d")
+  candidates    Int?         @default(0)
+  selectedCount Int?         @default(0) @map("selected_count")
+  rawPayload    Json         @map("raw_payload")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  traders       WhaleTrader[]
+
+  @@index([scanTime])
+  @@index([createdAt])
+  @@map("WhaleSnapshot")
+}
+
+model WhaleTrader {
+  id             String       @id @default(cuid())
+  snapshotId     String       @map("snapshot_id")
+  snapshot       WhaleSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  walletAddress  String       @map("wallet_address")
+  score          Decimal?     @db.Decimal(6,2)
+  rank           Int?
+  consistency    String?
+  riskLabel      String?      @map("risk_label")
+  pnlRank        Int?         @map("pnl_rank")
+  winRate        Decimal?     @map("win_rate") @db.Decimal(6,2)
+  holdTimeHours  Decimal?     @map("hold_time_hours") @db.Decimal(10,2)
+  maxDrawdownPct Decimal?     @map("max_drawdown_pct") @db.Decimal(6,2)
+  allocationPct  Decimal?     @map("allocation_pct") @db.Decimal(6,2)
+  overlapRiskPct Decimal?     @map("overlap_risk_pct") @db.Decimal(6,2)
+  createdAt      DateTime     @default(now()) @map("created_at")
+
+  @@index([snapshotId])
+  @@index([walletAddress])
+  @@index([score])
+  @@index([rank])
+  @@index([createdAt])
+  @@map("WhaleTrader")
+}
+
+model PaperTradingStore {
+  key       String   @id
+  state     Json
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("PaperTradingStore")
+}
+
+model SignalWatchlist {
+  id          String    @id @default(cuid())
+  asset       String    @unique
+  direction   String
+  entryScore  Int       @map("entry_score")
+  lastScore   Int       @map("last_score")
+  missedScans Int       @default(0) @map("missed_scans")
+  status      String    @default("ACTIVE")
+  entryPrice  Decimal?  @map("entry_price") @db.Decimal(20,8)
+  exitReason  String?   @map("exit_reason")
+  addedAt     DateTime  @default(now()) @map("added_at")
+  lastSeenAt  DateTime  @default(now()) @map("last_seen_at")
+  closedAt    DateTime? @map("closed_at")
+
+  @@index([status])
+  @@index([asset])
+  @@map("SignalWatchlist")
+}

@@ -1,0 +1,19 @@
+{
+  "name": "@noon-trader/backtest",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "run": "tsx src/run.ts",
+    "paper:run": "tsx src/paper-run.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "@noon-trader/trading": "*"
+  }
+}
