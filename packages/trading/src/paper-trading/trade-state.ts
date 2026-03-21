@@ -6,10 +6,25 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import type { PrismaClient } from '@prisma/client';
-import type { PaperTradingState } from './types.js';
+import type { PaperTradingState, SignalRejectionReason } from './types.js';
 
 const STATE_FILE = join(process.cwd(), 'artifacts', '.paper-trading-state.json');
 const STATE_KEY = 'default';
+
+function emptyRejectionCounts(): Record<SignalRejectionReason, number> {
+  return {
+    no_structure: 0,
+    adx: 0,
+    stale_bos: 0,
+    ec_veto: 0,
+    score: 0,
+    no_sl_level: 0,
+    sl_bounds: 0,
+    rr: 0,
+    four_hour_bias: 0,
+    risk: 0,
+  };
+}
 
 function defaultState(initialEquity: number): PaperTradingState {
   return {
@@ -31,6 +46,14 @@ function defaultState(initialEquity: number): PaperTradingState {
     pendingOrders: [],
     recentTrades: [],
     lastSlByAsset: {},
+    lastCycleDiagnostics: {
+      evaluatedAt: new Date().toISOString(),
+      assetsEvaluated: 0,
+      acceptedSignals: 0,
+      openedPositions: 0,
+      placedOrders: 0,
+      rejectionCounts: emptyRejectionCounts(),
+    },
   };
 }
 
@@ -40,6 +63,21 @@ function normalizeState(state: PaperTradingState, initialEquity: number): PaperT
   if (!state.pendingOrders) state.pendingOrders = [];
   if (!state.recentTrades) state.recentTrades = [];
   if (!state.lastSlByAsset) state.lastSlByAsset = {};
+  if (!state.lastCycleDiagnostics) {
+    state.lastCycleDiagnostics = {
+      evaluatedAt: new Date().toISOString(),
+      assetsEvaluated: 0,
+      acceptedSignals: 0,
+      openedPositions: 0,
+      placedOrders: 0,
+      rejectionCounts: emptyRejectionCounts(),
+    };
+  } else {
+    state.lastCycleDiagnostics.rejectionCounts = {
+      ...emptyRejectionCounts(),
+      ...state.lastCycleDiagnostics.rejectionCounts,
+    };
+  }
   if (typeof state.account.totalFeesUsd !== 'number') state.account.totalFeesUsd = 0;
   if (typeof state.account.totalFundingUsd !== 'number') state.account.totalFundingUsd = 0;
   return state;

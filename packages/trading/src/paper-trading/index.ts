@@ -7,9 +7,9 @@
  */
 
 import type { PrismaClient } from '@prisma/client';
-import type { PaperTradingConfig, PaperTradingState } from './types.js';
+import type { PaperTradingConfig, PaperTradingState, SignalRejectionReason } from './types.js';
 import { DEFAULT_CONFIG as DEFAULTS } from './types.js';
-import { analyzeSmcSetup, evaluateEntrySignal, calculateADX } from './smc-strategy.js';
+import { analyzeSmcSetup, evaluateEntryDecision, calculateADX } from './smc-strategy.js';
 import { tryOpenPosition, monitorPositions, checkPendingOrders } from './position-manager.js';
 import { checkHaltCooldown } from './risk-manager.js';
 import { loadState, saveState } from './trade-state.js';
@@ -44,9 +44,12 @@ function loadConfig(): PaperTradingConfig {
     maxHoldHours:          Number(process.env.PAPER_TRADING_MAX_HOLD_HOURS          ?? DEFAULTS.maxHoldHours),
     minAdxTrending:        Number(process.env.PAPER_TRADING_MIN_ADX                 ?? DEFAULTS.minAdxTrending),
     minEntryScore:         Number(process.env.PAPER_TRADING_MIN_ENTRY_SCORE         ?? DEFAULTS.minEntryScore),
+    maxBosAgeCandles:      Number(process.env.PAPER_TRADING_MAX_BOS_AGE_CANDLES     ?? DEFAULTS.maxBosAgeCandles),
     reEntryCooldownHours:  Number(process.env.PAPER_TRADING_REENTRY_COOLDOWN_HOURS  ?? DEFAULTS.reEntryCooldownHours),
     makerFeeBps:           Number(process.env.PAPER_TRADING_MAKER_FEE_BPS           ?? DEFAULTS.makerFeeBps),
     takerFeeBps:           Number(process.env.PAPER_TRADING_TAKER_FEE_BPS           ?? DEFAULTS.takerFeeBps),
+    enableHlContextFilters:
+      (process.env.PAPER_TRADING_ENABLE_HL_CONTEXT_FILTERS ?? String(DEFAULTS.enableHlContextFilters)) === 'true',
     maxAdverseFundingRateHourly: Number(
       process.env.PAPER_TRADING_MAX_ADVERSE_FUNDING_HOURLY ?? DEFAULTS.maxAdverseFundingRateHourly
     ),
@@ -114,6 +117,21 @@ let _dashboardStarted = false;
 /** Track last closed 1H candle per asset to avoid re-evaluating same candle */
 const _lastCandleClose = new Map<string, number>();
 
+function emptyRejectionCounts(): Record<SignalRejectionReason, number> {
+  return {
+    no_structure: 0,
+    adx: 0,
+    stale_bos: 0,
+    ec_veto: 0,
+    score: 0,
+    no_sl_level: 0,
+    sl_bounds: 0,
+    rr: 0,
+    four_hour_bias: 0,
+    risk: 0,
+  };
+}
+
 export async function runPaperTradingCycle(prisma?: PrismaClient): Promise<void> {
   if (!_dashboardStarted) {
     _dashboardStarted = true;
@@ -130,6 +148,11 @@ export async function runPaperTradingCycle(prisma?: PrismaClient): Promise<void>
   const config = _config;
   const state = _state;
   const webhookUrl = process.env.DISCORD_PAPER_TRADE_WEBHOOK ?? process.env.DISCORD_SIGNAL_WEBHOOK_URL;
+  const rejectionCounts = emptyRejectionCounts();
+  let assetsEvaluated = 0;
+  let acceptedSignals = 0;
+  let openedPositions = 0;
+  let placedOrders = 0;
   const log = (msg: string) => {
     console.log(`[paper-trading] ${msg}`);
     appendLog(msg);
@@ -233,51 +256,56 @@ export async function runPaperTradingCycle(prisma?: PrismaClient): Promise<void>
     const prev = _lastCandleClose.get(asset);
     if (prev !== undefined && prev === lastClosedCandle) continue; // same candle, skip
     _lastCandleClose.set(asset, lastClosedCandle);
+    assetsEvaluated++;
 
     // 4H bias filter: reject signals that go against 4H trend
     const bias4h = get4hBias(ohlc4h);
 
     // Evaluate entry on 1H using 4H SMC as the higher-TF confluence
-    const signal = evaluateEntrySignal(smc1h, smc4h, ohlc1h, config);
+    const decision = evaluateEntryDecision(smc1h, smc4h, ohlc1h, config);
+    const signal = decision.signal;
 
     if (!signal) {
-      // Debug: log why no signal (helps tune parameters)
+      const reason = decision.rejectionReason ?? 'score';
+      rejectionCounts[reason]++;
       const { structureBreaks } = smc1h;
       const lastBreak = structureBreaks[structureBreaks.length - 1];
       const adx1h = calculateADX(ohlc1h).toFixed(1);
       const bosAge = lastBreak ? `BOS@idx${lastBreak.index}/${smc1h.candleCount}(${lastBreak.type})` : 'noBOS';
-      const reasons: string[] = [];
-      if (structureBreaks.length === 0) reasons.push('no BOS/CHoCH');
-      else if (lastBreak && lastBreak.index < smc1h.candleCount - 30) reasons.push(`BOS too old (${bosAge})`);
-      log(`${asset}: no signal — ADX:${adx1h} ${bosAge} ${reasons.length ? reasons.join(', ') : 'score/RR/EC filter'}`);
+      log(`${asset}: no signal — ADX:${adx1h} ${bosAge} ${reason}`);
       continue;
     }
+
+    acceptedSignals++;
 
     // 4H bias gate: skip if signal direction opposes 4H trend
     if (bias4h !== 0 && (
       (signal.direction === 'LONG'  && bias4h === -1) ||
       (signal.direction === 'SHORT' && bias4h === 1)
     )) {
+      rejectionCounts.four_hour_bias++;
       log(`${asset}: ${signal.direction} blocked — opposes 4H bias (${bias4h === 1 ? 'bullish' : 'bearish'})`);
       continue;
     }
 
     const hlCtx = hlAssetMap?.get(asset) ?? null;
     if (hlCtx) {
-      const adverseFunding =
-        (signal.direction === 'LONG' && hlCtx.funding > config.maxAdverseFundingRateHourly) ||
-        (signal.direction === 'SHORT' && hlCtx.funding < -config.maxAdverseFundingRateHourly);
-      if (adverseFunding) {
-        log(`${asset}: ${signal.direction} blocked — adverse HL funding ${hlCtx.funding.toFixed(6)}`);
-        continue;
-      }
-      if (hlCtx.dayVolume < config.minDayVolumeUsd) {
-        log(`${asset}: blocked — HL day volume ${Math.round(hlCtx.dayVolume)} below ${config.minDayVolumeUsd}`);
-        continue;
-      }
-      if (hlCtx.openInterest < config.minOpenInterestUsd) {
-        log(`${asset}: blocked — HL open interest ${Math.round(hlCtx.openInterest)} below ${config.minOpenInterestUsd}`);
-        continue;
+      if (config.enableHlContextFilters) {
+        const adverseFunding =
+          (signal.direction === 'LONG' && hlCtx.funding > config.maxAdverseFundingRateHourly) ||
+          (signal.direction === 'SHORT' && hlCtx.funding < -config.maxAdverseFundingRateHourly);
+        if (adverseFunding) {
+          log(`${asset}: ${signal.direction} blocked — adverse HL funding ${hlCtx.funding.toFixed(6)}`);
+          continue;
+        }
+        if (hlCtx.dayVolume < config.minDayVolumeUsd) {
+          log(`${asset}: blocked — HL day volume ${Math.round(hlCtx.dayVolume)} below ${config.minDayVolumeUsd}`);
+          continue;
+        }
+        if (hlCtx.openInterest < config.minOpenInterestUsd) {
+          log(`${asset}: blocked — HL open interest ${Math.round(hlCtx.openInterest)} below ${config.minOpenInterestUsd}`);
+          continue;
+        }
       }
 
       signal.smcContext = {
@@ -292,16 +320,28 @@ export async function runPaperTradingCycle(prisma?: PrismaClient): Promise<void>
 
     const result = tryOpenPosition(signal, state, config);
     if (result.position) {
+      openedPositions++;
       state.openPositions.push(result.position);
       log(`OPENED ${result.position.direction} ${asset} @ $${result.position.entryPrice.toFixed(2)} SL:$${result.position.slPrice.toFixed(2)} TP1:$${result.position.tp1Price.toFixed(2)} R:R ${result.position.rrRatio} Score:${signal.score}`);
       if (webhookUrl) await sendTradeWebhook(webhookUrl, buildTradeOpenedEmbed(result.position));
     } else if (result.pendingOrder) {
+      placedOrders++;
       state.pendingOrders.push(result.pendingOrder);
       log(`LIMIT ORDER ${result.pendingOrder.direction} ${asset} @ $${result.pendingOrder.limitPrice.toFixed(2)} SL:$${result.pendingOrder.slPrice.toFixed(2)} R:R ${result.pendingOrder.rrRatio} Score:${signal.score}`);
     } else {
+      rejectionCounts.risk++;
       log(`${asset}: rejected — ${result.reason}`);
     }
   }
+
+  state.lastCycleDiagnostics = {
+    evaluatedAt: new Date().toISOString(),
+    assetsEvaluated,
+    acceptedSignals,
+    openedPositions,
+    placedOrders,
+    rejectionCounts,
+  };
 
   // ── Status log ───────────────────────────────────────────────────────────
   const openSummary = state.openPositions
@@ -317,6 +357,10 @@ export async function runPaperTradingCycle(prisma?: PrismaClient): Promise<void>
     `Trades:${state.account.totalTrades}(${state.account.winCount}W/${state.account.lossCount}L) ` +
     `Open:${state.openPositions.length > 0 ? openSummary : 'none'}` +
     (state.pendingOrders.length > 0 ? ` Pending:${pendingSummary}` : ''),
+  );
+  log(
+    `Cycle diagnostics — evaluated:${assetsEvaluated} accepted:${acceptedSignals} opened:${openedPositions} ` +
+    `pending:${placedOrders} rejects:${JSON.stringify(rejectionCounts)}`,
   );
 
   state.lastCycleAt = new Date().toISOString();

@@ -39,12 +39,16 @@ export interface PaperTradingConfig {
   minAdxTrending: number;
   /** Minimum confluence score to take a trade (default 45) */
   minEntryScore: number;
+  /** Maximum age in candles for the most recent BOS/CHoCH to remain tradable */
+  maxBosAgeCandles: number;
   /** Cooldown hours after SL hit before re-entering same asset */
   reEntryCooldownHours: number;
   /** Exchange maker fee in basis points */
   makerFeeBps: number;
   /** Exchange taker fee in basis points */
   takerFeeBps: number;
+  /** Whether to hard-block entries using Hyperliquid funding/liquidity filters */
+  enableHlContextFilters: boolean;
   /** Max adverse hourly funding tolerated before rejecting an entry */
   maxAdverseFundingRateHourly: number;
   /** Minimum 24h notional volume required for Hyperliquid context */
@@ -53,6 +57,27 @@ export interface PaperTradingConfig {
   minOpenInterestUsd: number;
   /** ADX threshold considered a strong trend for exit tuning */
   strongTrendAdx: number;
+}
+
+export type SignalRejectionReason =
+  | 'no_structure'
+  | 'adx'
+  | 'stale_bos'
+  | 'ec_veto'
+  | 'score'
+  | 'no_sl_level'
+  | 'sl_bounds'
+  | 'rr'
+  | 'four_hour_bias'
+  | 'risk';
+
+export interface CycleDiagnostics {
+  evaluatedAt: string;
+  assetsEvaluated: number;
+  acceptedSignals: number;
+  openedPositions: number;
+  placedOrders: number;
+  rejectionCounts: Record<SignalRejectionReason, number>;
 }
 
 export const DEFAULT_CONFIG: PaperTradingConfig = {
@@ -71,10 +96,12 @@ export const DEFAULT_CONFIG: PaperTradingConfig = {
   cycleIntervalSeconds: 300,
   maxHoldHours: 72,
   minAdxTrending: 15,
-  minEntryScore: 45,
+  minEntryScore: 35,
+  maxBosAgeCandles: 40,
   reEntryCooldownHours: 8,
   makerFeeBps: 1.5,
   takerFeeBps: 4.5,
+  enableHlContextFilters: false,
   maxAdverseFundingRateHourly: 0.0002,
   minDayVolumeUsd: 25_000_000,
   minOpenInterestUsd: 10_000_000,
@@ -250,5 +277,6 @@ export interface PaperTradingState {
   recentTrades: PaperPosition[]; // last 100 closed trades
   /** Tracks last SL time per asset for re-entry cooldown */
   lastSlByAsset: Record<string, string>; // asset → ISO timestamp
+  lastCycleDiagnostics?: CycleDiagnostics;
   lastCycleAt?: string;
 }

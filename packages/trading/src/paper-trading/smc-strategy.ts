@@ -29,7 +29,13 @@ import type {
   TradeDirection,
   PaperPosition,
   PaperTradingConfig,
+  SignalRejectionReason,
 } from './types.js';
+
+export interface EntryDecision {
+  signal: SmcEntrySignal | null;
+  rejectionReason?: SignalRejectionReason;
+}
 
 // ── SMC Analysis ─────────────────────────────────────────────────────────────
 
@@ -138,29 +144,52 @@ export function calculateADX(ohlc: OhlcArrays, period = 14): number {
  * - Determines optimal limit entry price at zone edge
  * - Multi-timeframe agreement tracked in confluence
  */
-export function evaluateEntrySignal(
+function regimeAdjustedMinScore(
+  regime: 'TRENDING' | 'RANGING' | 'VOLATILE',
+  config: PaperTradingConfig,
+): number {
+  if (regime === 'TRENDING') return Math.max(25, config.minEntryScore - 5);
+  if (regime === 'RANGING') return config.minEntryScore + 5;
+  return config.minEntryScore;
+}
+
+function regimeAdjustedMaxBosAge(
+  regime: 'TRENDING' | 'RANGING' | 'VOLATILE',
+  config: PaperTradingConfig,
+): number {
+  if (regime === 'TRENDING') return config.maxBosAgeCandles + 8;
+  if (regime === 'RANGING') return Math.max(20, config.maxBosAgeCandles - 8);
+  return config.maxBosAgeCandles;
+}
+
+export function evaluateEntryDecision(
   primarySmc: SmcAnalysis,
   higherTfSmc: SmcAnalysis,
   primaryOhlc: OhlcArrays,
   config: PaperTradingConfig,
-): SmcEntrySignal | null {
+): EntryDecision {
   const price = primarySmc.currentPrice;
   const { structureBreaks, fvgs, orderBlocks: obs, swings, euphoriaCapitulation: ec } = primarySmc;
 
-  if (structureBreaks.length === 0) return null;
+  if (structureBreaks.length === 0) return { signal: null, rejectionReason: 'no_structure' };
 
   // ── Regime filter: reject ranging markets ────────────────────────────────
   const adx = calculateADX(primaryOhlc);
-  if (adx < config.minAdxTrending) return null;
+  if (adx < config.minAdxTrending) return { signal: null, rejectionReason: 'adx' };
 
   const atrPct14 = calculateAtrPct(primaryOhlc.highs, primaryOhlc.lows, primaryOhlc.closes, 14);
   const atrPct50 = calculateAtrPct(primaryOhlc.highs, primaryOhlc.lows, primaryOhlc.closes, 50);
   const regime = classifyRegime(adx, atrPct14, atrPct50);
+  const minScore = regimeAdjustedMinScore(regime, config);
+  const maxBosAgeCandles = regimeAdjustedMaxBosAge(regime, config);
 
   // Get most recent BOS/CHoCH
   const lastBreak = structureBreaks[structureBreaks.length - 1];
-  // Only consider recent breaks (within last 30 candles — ~30h on 1H, ~5 days on 4H)
-  if (lastBreak.index < primarySmc.candleCount - 30) return null;
+  // Only consider recent breaks. Older structure breaks are treated as stale because
+  // the market has had too much time to absorb the displacement and invalidate the setup.
+  if (lastBreak.index < primarySmc.candleCount - maxBosAgeCandles) {
+    return { signal: null, rejectionReason: 'stale_bos' };
+  }
 
   const direction: TradeDirection = lastBreak.direction === 1 ? 'LONG' : 'SHORT';
 
@@ -170,8 +199,8 @@ export function evaluateEntrySignal(
     (e) => e.index >= primarySmc.candleCount - ecLookback - 1,
   );
   for (const sig of recentEC) {
-    if (sig.type === 1 && direction === 'LONG') return null;
-    if (sig.type === -1 && direction === 'SHORT') return null;
+    if (sig.type === 1 && direction === 'LONG') return { signal: null, rejectionReason: 'ec_veto' };
+    if (sig.type === -1 && direction === 'SHORT') return { signal: null, rejectionReason: 'ec_veto' };
   }
 
   // ── Confluence Scoring ──────────────────────────────────────────────────
@@ -279,7 +308,7 @@ export function evaluateEntrySignal(
 
   // ── Entry threshold: need primary + at least 2 confirmations ────────────
   console.log(`[paper-trading] ${primarySmc.asset} score=${score} (BOS:${lastBreak.type} FVG:${confluence.fvgRetest} OB:${confluence.obRetest} Swing:${confluence.swingAlignment} MTF:${confluence.mtfAgreement}) adx=${adx.toFixed(1)} regime:${regime} dir:${direction} bosAge:${primarySmc.candleCount - lastBreak.index}`);
-  if (score < config.minEntryScore) return null;
+  if (score < minScore) return { signal: null, rejectionReason: 'score' };
 
   // ── Determine entry type and optimal price ──────────────────────────────
   // If price is inside a zone, use market entry.
@@ -311,10 +340,13 @@ export function evaluateEntrySignal(
   // ── Calculate SL ────────────────────────────────────────────────────────
   const effectiveEntry = entryType === 'limit' ? limitPrice : price;
   const slPrice = calculateStopLoss(primarySmc, direction, effectiveEntry, config);
-  if (slPrice === null) { console.log(`[paper-trading] ${primarySmc.asset} REJECTED: no SL level`); return null; }
+  if (slPrice === null) { console.log(`[paper-trading] ${primarySmc.asset} REJECTED: no SL level`); return { signal: null, rejectionReason: 'no_sl_level' }; }
 
   const slPct = Math.abs(effectiveEntry - slPrice) / effectiveEntry * 100;
-  if (slPct < config.minSlPct || slPct > config.maxSlPct) { console.log(`[paper-trading] ${primarySmc.asset} REJECTED: SL% ${slPct.toFixed(2)} out of bounds [${config.minSlPct},${config.maxSlPct}]`); return null; }
+  if (slPct < config.minSlPct || slPct > config.maxSlPct) {
+    console.log(`[paper-trading] ${primarySmc.asset} REJECTED: SL% ${slPct.toFixed(2)} out of bounds [${config.minSlPct},${config.maxSlPct}]`);
+    return { signal: null, rejectionReason: 'sl_bounds' };
+  }
 
   // ── Calculate TP ────────────────────────────────────────────────────────
   const { tp1, tp2 } = calculateTakeProfit(primarySmc, direction, effectiveEntry, slPrice, config, regime, adx);
@@ -323,7 +355,10 @@ export function evaluateEntrySignal(
   const slDist = Math.abs(effectiveEntry - slPrice);
   const rrRatio = tp1Dist / slDist;
 
-  if (rrRatio < config.minRR) { console.log(`[paper-trading] ${primarySmc.asset} REJECTED: RR ${rrRatio.toFixed(2)} < ${config.minRR} (entry:${effectiveEntry.toFixed(2)} SL:${slPrice.toFixed(2)} TP1:${tp1.toFixed(2)})`); return null; }
+  if (rrRatio < config.minRR) {
+    console.log(`[paper-trading] ${primarySmc.asset} REJECTED: RR ${rrRatio.toFixed(2)} < ${config.minRR} (entry:${effectiveEntry.toFixed(2)} SL:${slPrice.toFixed(2)} TP1:${tp1.toFixed(2)})`);
+    return { signal: null, rejectionReason: 'rr' };
+  }
 
   const strongTrend = regime === 'TRENDING' && adx >= config.strongTrendAdx;
   const maxHoldHours = strongTrend
@@ -333,36 +368,49 @@ export function evaluateEntrySignal(
       : config.maxHoldHours;
 
   return {
-    asset: primarySmc.asset,
-    direction,
-    entryPrice: price,
-    limitPrice,
-    slPrice,
-    tp1Price: tp1,
-    tp2Price: tp2,
-    slPct,
-    rrRatio: Math.round(rrRatio * 100) / 100,
-    score,
-    entryType,
-    confluence,
-    regime,
-    adx: Math.round(adx * 10) / 10,
-    maxHoldHours,
-    smcContext: {
-      lastBreak: { type: lastBreak.type, direction: lastBreak.direction, level: lastBreak.level },
-      activeFvgs: activeFvgs.length,
-      activeOBs: activeOBs.length,
-      adx: Math.round(adx * 10) / 10,
-      regime,
-      atrPct14,
-      atrPct50,
-      maxHoldHours,
-      recentEC: recentEC.map((e) => ({ type: e.type, zScore: e.zScore })),
+    signal: {
+      asset: primarySmc.asset,
+      direction,
+      entryPrice: price,
+      limitPrice,
+      slPrice,
+      tp1Price: tp1,
+      tp2Price: tp2,
+      slPct,
+      rrRatio: Math.round(rrRatio * 100) / 100,
+      score,
       entryType,
-      limitPrice: entryType === 'limit' ? limitPrice : undefined,
-      partialTakePct: strongTrend ? 0.4 : 0.5,
+      confluence,
+      regime,
+      adx: Math.round(adx * 10) / 10,
+      maxHoldHours,
+      smcContext: {
+        lastBreak: { type: lastBreak.type, direction: lastBreak.direction, level: lastBreak.level },
+        activeFvgs: activeFvgs.length,
+        activeOBs: activeOBs.length,
+        adx: Math.round(adx * 10) / 10,
+        regime,
+        atrPct14,
+        atrPct50,
+        maxHoldHours,
+        recentEC: recentEC.map((e) => ({ type: e.type, zScore: e.zScore })),
+        entryType,
+        limitPrice: entryType === 'limit' ? limitPrice : undefined,
+        partialTakePct: strongTrend ? 0.4 : 0.5,
+        scoreThreshold: minScore,
+        maxBosAgeCandles,
+      },
     },
   };
+}
+
+export function evaluateEntrySignal(
+  primarySmc: SmcAnalysis,
+  higherTfSmc: SmcAnalysis,
+  primaryOhlc: OhlcArrays,
+  config: PaperTradingConfig,
+): SmcEntrySignal | null {
+  return evaluateEntryDecision(primarySmc, higherTfSmc, primaryOhlc, config).signal;
 }
 
 // ── Stop Loss Calculation ────────────────────────────────────────────────────
