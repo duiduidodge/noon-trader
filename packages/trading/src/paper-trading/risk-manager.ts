@@ -48,7 +48,7 @@ export function calculatePositionSize(
 
   return {
     sizeUsd: Math.round(sizeUsd * 100) / 100,
-    leverage: Math.max(1, leverage),
+    leverage: Math.max(2, leverage),
     dollarRisk: Math.round(riskAmount * 100) / 100,
   };
 }

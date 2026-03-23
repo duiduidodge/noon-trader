@@ -13,7 +13,7 @@ import { analyzeSmcSetup, evaluateEntryDecision, calculateADX } from './smc-stra
 import { tryOpenPosition, monitorPositions, checkPendingOrders } from './position-manager.js';
 import { checkHaltCooldown } from './risk-manager.js';
 import { loadState, saveState } from './trade-state.js';
-import { fetchHLAssetMap } from '../hyperliquid-client.js';
+import { fetchHLAssetMap, fetchHLCandles } from '../hyperliquid-client.js';
 import {
   buildTradeOpenedEmbed,
   buildTradeClosedEmbed,
@@ -59,35 +59,26 @@ function loadConfig(): PaperTradingConfig {
   };
 }
 
-// ── Binance Kline Fetcher ────────────────────────────────────────────────────
-
-const BINANCE_BASE = 'https://fapi.binance.com';
-
 async function fetchKlines(
-  symbol: string,
+  asset: string,
   interval: string,
   limit: number,
 ): Promise<OhlcArrays | null> {
-  const url = `${BINANCE_BASE}/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
   try {
-    const resp = await fetch(url, { signal: AbortSignal.timeout(10_000) });
-    if (!resp.ok) return null;
-    const data = (await resp.json()) as unknown[][];
+    if (interval !== '1h' && interval !== '4h') return null;
+    const data = await fetchHLCandles(asset, interval, limit);
+    if (!data || data.length === 0) return null;
     if (!Array.isArray(data) || data.length === 0) return null;
     return {
-      opens:  data.map((k) => parseFloat(k[1] as string)),
-      highs:  data.map((k) => parseFloat(k[2] as string)),
-      lows:   data.map((k) => parseFloat(k[3] as string)),
-      closes: data.map((k) => parseFloat(k[4] as string)),
-      vols:   data.map((k) => parseFloat(k[5] as string)),
+      opens:  data.map((k) => parseFloat(k.o)),
+      highs:  data.map((k) => parseFloat(k.h)),
+      lows:   data.map((k) => parseFloat(k.l)),
+      closes: data.map((k) => parseFloat(k.c)),
+      vols:   data.map((k) => parseFloat(k.v)),
     };
   } catch {
     return null;
   }
-}
-
-function toSymbol(asset: string): string {
-  return `${asset}USDT`;
 }
 
 // ── 4H bias: returns 1 (bullish), -1 (bearish), 0 (no clear bias) ────────────
@@ -187,10 +178,9 @@ export async function runPaperTradingCycle(prisma?: PrismaClient): Promise<void>
 
   await Promise.all(
     config.assets.map(async (asset) => {
-      const symbol = toSymbol(asset);
       const [k1h, k4h] = await Promise.all([
-        fetchKlines(symbol, '1h', 200),
-        fetchKlines(symbol, '4h', 200),
+        fetchKlines(asset, '1h', 200),
+        fetchKlines(asset, '4h', 200),
       ]);
 
       if (k1h) {

@@ -356,6 +356,36 @@ function evaluateSwingGrade(
 // ─── Binance API fetchers ─────────────────────────────────────────────────────
 
 async function fetchKlines(symbol: string, interval: string, limit: number): Promise<KlineData | null> {
+  const configuredMarketDataUrl = process.env.MARKET_DATA_URL?.trim();
+  const marketDataUrl = configuredMarketDataUrl ? configuredMarketDataUrl.replace(/\/+$/, '') : '';
+  if (marketDataUrl) {
+    const mcpSymbol = symbol.endsWith('USDT') ? symbol.slice(0, -4) : symbol;
+    const query = new URLSearchParams({
+      symbol: mcpSymbol,
+      timeframe: interval,
+      limit: String(limit),
+    });
+    const response = await fetch(`${marketDataUrl}/candles?${query.toString()}`);
+    if (!response.ok) return null;
+    const payload = (await response.json()) as {
+      candles?: {
+        opens: number[];
+        highs: number[];
+        lows: number[];
+        closes: number[];
+        volumes?: number[];
+      };
+    };
+    if (!payload.candles) return null;
+    return {
+      opens: payload.candles.opens.map(Number),
+      highs: payload.candles.highs.map(Number),
+      lows: payload.candles.lows.map(Number),
+      closes: payload.candles.closes.map(Number),
+      vols: (payload.candles.volumes ?? []).map(Number),
+    };
+  }
+
   const data = await getJson<unknown[][]>(`${BASE_URL}/fapi/v1/klines`, { symbol, interval, limit });
   if (!data || !Array.isArray(data)) return null;
   return {
@@ -1126,7 +1156,8 @@ export async function runOpportunityScan(): Promise<OpportunityScanResult> {
   const thresholds = computeThresholds(marketStats);
 
   // Fetch Hyperliquid data once for the whole scan (feature-flagged)
-  const hlEnabled = process.env.ENABLE_HYPERLIQUID === 'true';
+  const mcpEnabled = Boolean(process.env.MARKET_DATA_URL?.trim());
+  const hlEnabled = process.env.ENABLE_HYPERLIQUID === 'true' || mcpEnabled;
   const hlMap: HLAssetMap | null = hlEnabled ? await fetchHLAssetMap() : null;
 
   // Fetch all tickers
@@ -1145,6 +1176,7 @@ export async function runOpportunityScan(): Promise<OpportunityScanResult> {
       if (!sym.endsWith('USDT')) return false;
       if (EXCLUDE_SYMBOLS.has(sym)) return false;
       const base = sym.slice(0, -4);
+      if (hlMap && !hlMap.has(base)) return false;
       if (EXCLUDE_SUFFIXES.some((sfx) => base.endsWith(sfx))) return false;
       return parseFloat(t.quoteVolume) >= MIN_VOLUME_USDT;
     })
