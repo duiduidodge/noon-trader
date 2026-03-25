@@ -385,7 +385,12 @@ export function evaluateEntryDecision(
       adx: Math.round(adx * 10) / 10,
       maxHoldHours,
       smcContext: {
-        lastBreak: { type: lastBreak.type, direction: lastBreak.direction, level: lastBreak.level },
+        lastBreak: {
+          index: lastBreak.index,
+          type: lastBreak.type,
+          direction: lastBreak.direction,
+          level: lastBreak.level,
+        },
         activeFvgs: activeFvgs.length,
         activeOBs: activeOBs.length,
         adx: Math.round(adx * 10) / 10,
@@ -534,16 +539,20 @@ export function checkStructureInvalidation(
   smc: SmcAnalysis,
 ): 'STRUCTURE_INVALIDATED' | 'EC_FORCE_CLOSE' | null {
   const { structureBreaks, euphoriaCapitulation: ec } = smc;
-
-  // CHoCH against position direction = structure reversal
-  const recentBreaks = structureBreaks.filter(
-    (b) => b.index >= smc.candleCount - 5,
+  const entryBreakIndex = Number(
+    (position.smcContext.lastBreak as { index?: number } | undefined)?.index ?? -1,
   );
+
+  // A newer opposing structure break invalidates the trade thesis.
+  // Prefer post-entry breaks; otherwise fall back to the most recent structure window.
+  const recentBreaks = structureBreaks.filter((b) => (
+    entryBreakIndex >= 0
+      ? b.index > entryBreakIndex
+      : b.index >= smc.candleCount - 5
+  ));
   for (const brk of recentBreaks) {
-    if (brk.type === 'CHoCH') {
-      if (position.direction === 'LONG' && brk.direction === -1) return 'STRUCTURE_INVALIDATED';
-      if (position.direction === 'SHORT' && brk.direction === 1) return 'STRUCTURE_INVALIDATED';
-    }
+    if (position.direction === 'LONG' && brk.direction === -1) return 'STRUCTURE_INVALIDATED';
+    if (position.direction === 'SHORT' && brk.direction === 1) return 'STRUCTURE_INVALIDATED';
   }
 
   // Strong E&C signal (zScore > 3) forces close

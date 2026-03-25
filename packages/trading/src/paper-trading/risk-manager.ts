@@ -25,6 +25,13 @@ export function calculatePositionSize(
 ): PositionSizing {
   const riskAmount = equity * (config.riskPerTradePct / 100);
   const slDistance = Math.abs(entryPrice - slPrice) / entryPrice;
+  if (!Number.isFinite(slDistance) || slDistance <= 0) {
+    return {
+      sizeUsd: 0,
+      leverage: 1,
+      dollarRisk: Math.round(riskAmount * 100) / 100,
+    };
+  }
 
   // Position size = risk / SL distance (as fraction)
   let sizeUsd = riskAmount / slDistance;
@@ -35,8 +42,8 @@ export function calculatePositionSize(
     sizeUsd = maxSizeByLeverage;
   }
 
-  // Cap at 20% of equity per position (notional without leverage)
-  const maxNotional = equity * 0.2 * config.maxLeverage;
+  // Cap at a configurable fraction of equity per position before leverage scaling.
+  const maxNotional = equity * config.maxPositionEquityMultiple * config.maxLeverage;
   if (sizeUsd > maxNotional) {
     sizeUsd = maxNotional;
   }

@@ -37,8 +37,16 @@ function loadConfig(): PaperTradingConfig {
     riskPerTradePct:       Number(process.env.PAPER_TRADING_RISK_PER_TRADE          ?? DEFAULTS.riskPerTradePct),
     minRR:                 Number(process.env.PAPER_TRADING_MIN_RR                  ?? DEFAULTS.minRR),
     maxConcurrent:         Number(process.env.PAPER_TRADING_MAX_CONCURRENT          ?? DEFAULTS.maxConcurrent),
+    maxPortfolioRiskPct:   Number(process.env.PAPER_TRADING_MAX_PORTFOLIO_RISK      ?? DEFAULTS.maxPortfolioRiskPct),
     maxDrawdownPct:        Number(process.env.PAPER_TRADING_MAX_DRAWDOWN            ?? DEFAULTS.maxDrawdownPct),
     dailyLossLimitPct:     Number(process.env.PAPER_TRADING_DAILY_LOSS_LIMIT        ?? DEFAULTS.dailyLossLimitPct),
+    maxLeverage:           Number(process.env.PAPER_TRADING_MAX_LEVERAGE            ?? DEFAULTS.maxLeverage),
+    maxPositionEquityMultiple: Number(
+      process.env.PAPER_TRADING_MAX_POSITION_EQUITY_MULTIPLE ?? DEFAULTS.maxPositionEquityMultiple
+    ),
+    minSlPct:              Number(process.env.PAPER_TRADING_MIN_SL_PCT              ?? DEFAULTS.minSlPct),
+    maxSlPct:              Number(process.env.PAPER_TRADING_MAX_SL_PCT              ?? DEFAULTS.maxSlPct),
+    slippagePct:           Number(process.env.PAPER_TRADING_SLIPPAGE_PCT            ?? DEFAULTS.slippagePct),
     initialEquity:         Number(process.env.PAPER_TRADING_INITIAL_EQUITY          ?? DEFAULTS.initialEquity),
     cycleIntervalSeconds:  Number(process.env.PAPER_TRADING_INTERVAL_SECONDS        ?? DEFAULTS.cycleIntervalSeconds),
     maxHoldHours:          Number(process.env.PAPER_TRADING_MAX_HOLD_HOURS          ?? DEFAULTS.maxHoldHours),

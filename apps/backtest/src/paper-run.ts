@@ -470,6 +470,14 @@ async function main() {
     initialEquity: Number(process.env.PAPER_TRADING_INITIAL_EQUITY ?? DEFAULT_CONFIG.initialEquity),
     riskPerTradePct: Number(process.env.PAPER_TRADING_RISK_PER_TRADE ?? DEFAULT_CONFIG.riskPerTradePct),
     minRR: Number(process.env.PAPER_TRADING_MIN_RR ?? DEFAULT_CONFIG.minRR),
+    maxPortfolioRiskPct: Number(process.env.PAPER_TRADING_MAX_PORTFOLIO_RISK ?? DEFAULT_CONFIG.maxPortfolioRiskPct),
+    maxLeverage: Number(process.env.PAPER_TRADING_MAX_LEVERAGE ?? DEFAULT_CONFIG.maxLeverage),
+    maxPositionEquityMultiple: Number(
+      process.env.PAPER_TRADING_MAX_POSITION_EQUITY_MULTIPLE ?? DEFAULT_CONFIG.maxPositionEquityMultiple
+    ),
+    minSlPct: Number(process.env.PAPER_TRADING_MIN_SL_PCT ?? DEFAULT_CONFIG.minSlPct),
+    maxSlPct: Number(process.env.PAPER_TRADING_MAX_SL_PCT ?? DEFAULT_CONFIG.maxSlPct),
+    slippagePct: Number(process.env.PAPER_TRADING_SLIPPAGE_PCT ?? DEFAULT_CONFIG.slippagePct),
     maxHoldHours: Number(process.env.PAPER_TRADING_MAX_HOLD_HOURS ?? DEFAULT_CONFIG.maxHoldHours),
     minAdxTrending: Number(process.env.PAPER_TRADING_MIN_ADX ?? DEFAULT_CONFIG.minAdxTrending),
     minEntryScore: Number(process.env.PAPER_TRADING_MIN_ENTRY_SCORE ?? DEFAULT_CONFIG.minEntryScore),

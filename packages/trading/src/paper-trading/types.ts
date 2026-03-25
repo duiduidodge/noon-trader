@@ -23,6 +23,8 @@ export interface PaperTradingConfig {
   maxDrawdownPct: number;
   /** Max leverage */
   maxLeverage: number;
+  /** Max notional exposure per position as a multiple of equity before leverage cap */
+  maxPositionEquityMultiple: number;
   /** Min SL distance as % */
   minSlPct: number;
   /** Max SL distance as % */
@@ -82,13 +84,14 @@ export interface CycleDiagnostics {
 
 export const DEFAULT_CONFIG: PaperTradingConfig = {
   assets: ['BTC', 'ETH', 'SOL'],
-  riskPerTradePct: 1,
+  riskPerTradePct: 5,
   minRR: 2.0,
   maxConcurrent: 3,
-  maxPortfolioRiskPct: 3,
+  maxPortfolioRiskPct: 15,
   dailyLossLimitPct: 3,
   maxDrawdownPct: 10,
   maxLeverage: 10,
+  maxPositionEquityMultiple: 0.5,
   minSlPct: 0.3,
   maxSlPct: 8.0,
   slippagePct: 0.05,
