@@ -83,7 +83,7 @@ export interface CycleDiagnostics {
 }
 
 export const DEFAULT_CONFIG: PaperTradingConfig = {
-  assets: ['BTC', 'ETH', 'SOL'],
+  assets: ['BTC', 'ETH', 'SOL', 'PAXG'],
   riskPerTradePct: 5,
   minRR: 2.0,
   maxConcurrent: 3,

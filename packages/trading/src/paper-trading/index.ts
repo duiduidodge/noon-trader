@@ -27,7 +27,7 @@ import { startDashboardServer, appendLog } from './dashboard-server.js';
 // ── Config from env ──────────────────────────────────────────────────────────
 
 function loadConfig(): PaperTradingConfig {
-  const assets = (process.env.PAPER_TRADING_ASSETS ?? 'BTC,ETH,SOL')
+  const assets = (process.env.PAPER_TRADING_ASSETS ?? 'BTC,ETH,SOL,PAXG')
     .split(',')
     .map((s) => s.trim().toUpperCase());
 
